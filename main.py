@@ -160,7 +160,7 @@ def text_handler(update, context):
                 return
 
             admin_state[user_id] = {"step": "code", "package": text}
-            update.message.reply_text("Send codes (multiple lines or TXT file)")
+            update.message.reply_text("Send codes (multi-line or TXT file)")
             return
 
         if user_id in admin_state and admin_state[user_id]["step"] == "code":
@@ -213,51 +213,6 @@ def text_handler(update, context):
         except:
             update.message.reply_text("Send valid number ❌")
 
-# ================= DOCUMENT HANDLER =================
-def handle_document(update, context):
-    user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
-        return
-
-    if user_id not in admin_state or admin_state[user_id]["step"] != "code":
-        update.message.reply_text("❌ First choose package")
-        return
-
-    file = update.message.document
-    if not file.file_name.endswith(".txt"):
-        update.message.reply_text("❌ Only TXT allowed")
-        return
-
-    pkg = admin_state[user_id]["package"]
-
-    file_obj = file.get_file()
-    content = file_obj.download_as_bytearray().decode("utf-8")
-    codes_list = content.splitlines()
-
-    added = 0
-    duplicate = 0
-
-    for code in codes_list:
-        code = code.strip()
-        if not code:
-            continue
-
-        cursor.execute(
-            "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
-            (code, pkg)
-        )
-
-        if cursor.rowcount == 1:
-            added += 1
-        else:
-            duplicate += 1
-
-    conn.commit()
-    del admin_state[user_id]
-
-    update.message.reply_text(f"✅ Upload Complete\nAdded: {added}\nDuplicate: {duplicate}")
-
 # ================= MAIN =================
 def main():
     updater = Updater(TOKEN, use_context=True)
@@ -269,12 +224,11 @@ def main():
     dp.add_handler(MessageHandler(Filters.regex("💳 Charge Wallet"), charge))
     dp.add_handler(MessageHandler(Filters.regex("👑 Admin Panel"), admin_panel))
     dp.add_handler(CallbackQueryHandler(buttons))
-    dp.add_handler(MessageHandler(Filters.document, handle_document))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
 
-    # 🔥 Production Stable Polling
+    # 🔥 Production Stable Polling (Correct)
     updater.bot.delete_webhook(drop_pending_updates=True)
-    updater.start_polling(drop_pending_updates=True, timeout=30, clean=True)
+    updater.start_polling(drop_pending_updates=True, timeout=30)
     updater.idle()
 
 if __name__ == "__main__":
