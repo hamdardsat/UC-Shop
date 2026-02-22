@@ -16,15 +16,6 @@ CUSTOMER_PRICES = {
     "8100": 89.00
 }
 
-SELLER_PRICES = {
-    "60": 0.87,
-    "325": 4.42,
-    "660": 8.85,
-    "1800": 22.12,
-    "3850": 44.00,
-    "8100": 88.00
-}
-
 # ================= DATABASE =================
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -36,7 +27,6 @@ cursor.execute("CREATE TABLE IF NOT EXISTS charge_requests (id INTEGER PRIMARY K
 conn.commit()
 
 state = {}
-last_purchase = {}
 
 # ================= MENU =================
 def menu(user_id):
@@ -87,9 +77,8 @@ def buy(update, context):
 def buttons(update, context):
     query = update.callback_query
     query.answer()
-    user_id = query.from_user.id
 
-    # ===== APPROVE CHARGE =====
+    # ===== APPROVE =====
     if query.data.startswith("approve_"):
         uid = int(query.data.split("_")[1])
 
@@ -102,7 +91,7 @@ def buttons(update, context):
         amount = data[0]
 
         cursor.execute("UPDATE users SET balance=balance+? WHERE user_id=?", (amount, uid))
-        cursor.execute("UPDATE charge_requests SET status='approved' WHERE user_id=? AND status='pending'", (uid,))
+        cursor.execute("UPDATE charge_requests SET status='approved' WHERE user_id=?", (uid,))
         conn.commit()
 
         query.edit_message_text("✅ Charge Approved")
@@ -111,6 +100,7 @@ def buttons(update, context):
     # ===== BUY =====
     if query.data.startswith("buy_"):
         pkg = query.data.split("_")[1]
+        user_id = query.from_user.id
         price = CUSTOMER_PRICES[pkg]
 
         cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
@@ -136,12 +126,30 @@ def buttons(update, context):
 
         query.edit_message_text(f"🎁 UC Code:\n\n`{code}`", parse_mode="Markdown")
 
+# ================= ADMIN PANEL =================
+def admin_panel(update, context):
+    if update.effective_user.id != ADMIN_ID:
+        update.message.reply_text("❌ Access Denied")
+        return
+
+    keyboard = [
+        ["➕ Add UC Code"],
+        ["📦 Stock Status"],
+        ["📊 Statistics"],
+        ["🔙 Main Menu"]
+    ]
+
+    update.message.reply_text(
+        "👑 ADMIN PANEL",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
 # ================= TEXT HANDLER =================
 def text_handler(update, context):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # ===== ADMIN PANEL =====
+    # ===== ADMIN SECTION =====
     if user_id == ADMIN_ID:
 
         if text == "➕ Add UC Code":
@@ -151,23 +159,44 @@ def text_handler(update, context):
 
         if context.user_data.get("step") == "package":
             if text not in CUSTOMER_PRICES:
-                update.message.reply_text("Invalid package ❌")
+                update.message.reply_text("❌ Invalid package")
                 return
             context.user_data["package"] = text
             context.user_data["step"] = "code"
-            update.message.reply_text("Send UC code:")
+            update.message.reply_text("Now send UC codes (one per line)")
             return
 
+        # 🔥 MULTI CODE ADD
         if context.user_data.get("step") == "code":
             pkg = context.user_data["package"]
-            cursor.execute("INSERT INTO codes (code, amount, status) VALUES (?, ?, 'available')", (text, pkg))
+            codes_list = text.splitlines()
+
+            added = 0
+            duplicate = 0
+
+            for c in codes_list:
+                c = c.strip()
+                if not c:
+                    continue
+                try:
+                    cursor.execute(
+                        "INSERT INTO codes (code, amount, status) VALUES (?, ?, 'available')",
+                        (c, pkg)
+                    )
+                    added += 1
+                except:
+                    duplicate += 1
+
             conn.commit()
             context.user_data.clear()
-            update.message.reply_text("✅ Code Added")
+
+            update.message.reply_text(
+                f"✅ Added: {added}\n⚠️ Duplicates: {duplicate}"
+            )
             return
 
         if text == "📦 Stock Status":
-            msg = "📦 STOCK\n"
+            msg = "📦 STOCK STATUS\n\n"
             for pkg in CUSTOMER_PRICES:
                 cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
                 count = cursor.fetchone()[0]
@@ -180,7 +209,13 @@ def text_handler(update, context):
             users = cursor.fetchone()[0]
             cursor.execute("SELECT SUM(price) FROM sales")
             income = cursor.fetchone()[0] or 0
-            update.message.reply_text(f"Users: {users}\nIncome: {income} USDT")
+            update.message.reply_text(
+                f"📊 STATISTICS\n\n👤 Users: {users}\n💰 Income: {income} USDT"
+            )
+            return
+
+        if text == "🔙 Main Menu":
+            update.message.reply_text("Back to main menu", reply_markup=menu(user_id))
             return
 
     # ===== CHARGE REQUEST =====
@@ -201,23 +236,6 @@ def text_handler(update, context):
             state.pop(user_id)
         except:
             update.message.reply_text("Send valid number ❌")
-
-# ================= ADMIN PANEL =================
-def admin_panel(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        update.message.reply_text("❌ Access Denied")
-        return
-
-    keyboard = [
-        ["➕ Add UC Code"],
-        ["📦 Stock Status"],
-        ["📊 Statistics"]
-    ]
-
-    update.message.reply_text(
-        "👑 ADMIN PANEL",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
 
 # ================= MAIN =================
 def main():
