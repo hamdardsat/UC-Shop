@@ -214,6 +214,31 @@ def main():
 
     updater.start_polling()
     updater.idle()
+def admin_panel(update, context):
+    user_id = update.effective_user.id
+
+    if user_id != ADMIN_ID:
+        update.message.reply_text("❌ Access Denied")
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM sellers WHERE approved=1")
+    sellers = cursor.fetchone()[0]
+
+    cursor.execute("SELECT SUM(price) FROM sales")
+    income = cursor.fetchone()[0] or 0
+
+    update.message.reply_text(
+        f"""
+👑 Admin Dashboard
+
+👤 Users: {users}
+👥 Sellers: {sellers}
+💰 Total Income: {income} USDT
+"""
+    )
 
 if __name__ == "__main__":
     main()
