@@ -180,25 +180,75 @@ def buttons(update, context):
         buy(update, context)
 
 # ---------------- TEXT HANDLER ----------------
-def text(update, context):
+def text_handler(update, context):
     user_id = update.effective_user.id
+    text = update.message.text.strip()
 
-    if user_id in state and state[user_id] == "charge":
-        amount = float(update.message.text)
+    # فقط ادمین
+    if user_id != ADMIN_ID:
+        return
 
-        cursor.execute("INSERT INTO charge_requests (user_id, amount, status) VALUES (?, ?, 'pending')",
-                       (user_id, amount))
+    if text == "➕ Add UC Code":
+        context.user_data["step"] = "package"
+        update.message.reply_text(
+            "Send package number:\n60 / 325 / 660 / 1800 / 3850 / 8100"
+        )
+        return
+
+    if context.user_data.get("step") == "package":
+        try:
+            package = int(text)
+
+            if package not in PACKAGES:
+                update.message.reply_text("❌ Invalid package")
+                return
+
+            context.user_data["package"] = package
+            context.user_data["step"] = "code"
+
+            update.message.reply_text("Now send the UC code:")
+        except:
+            update.message.reply_text("❌ Send number only")
+        return
+
+    if context.user_data.get("step") == "code":
+        package = context.user_data["package"]
+
+        cursor.execute(
+            "INSERT INTO codes (code, package) VALUES (?, ?)",
+            (text, package)
+        )
         conn.commit()
 
-        keyboard = [[InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}_{amount}")]]
-        context.bot.send_message(
-            ADMIN_ID,
-            f"New Charge Request\nUser: {user_id}\nAmount: {amount}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        context.user_data.clear()
+        update.message.reply_text("✅ Code Added Successfully")
+        return
 
-        update.message.reply_text("⏳ Waiting for admin approval")
-        state.pop(user_id)
+    if text == "📦 Stock Status":
+        msg = "📦 STOCK STATUS\n\n"
+        for uc in PACKAGES:
+            cursor.execute("SELECT COUNT(*) FROM codes WHERE package=?", (uc,))
+            count = cursor.fetchone()[0]
+            msg += f"{uc} UC → {count}\n"
+
+        update.message.reply_text(msg)
+        return
+
+    if text == "📊 Statistics":
+        cursor.execute("SELECT COUNT(*) FROM users")
+        users = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM codes")
+        stock = cursor.fetchone()[0]
+
+        update.message.reply_text(
+            f"📊 STATISTICS\n\n👥 Users: {users}\n📦 Total Stock: {stock}"
+        )
+        return
+
+    if text == "🔙 Main Menu":
+        update.message.reply_text("Back to main menu 👑", reply_markup=menu(user_id))
+        return
 
 # ---------------- MAIN ----------------
 def main():
