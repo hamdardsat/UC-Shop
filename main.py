@@ -5,7 +5,7 @@ from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMa
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
-255196166 = 255196166  # 👈 آیدی عددی خودت
+ADMIN_ID = 255196166
 
 CUSTOMER_PRICES = {
     "60": 0.89,
@@ -249,26 +249,10 @@ def text_handler(update, context):
     if text == "🔙 Main Menu":
         update.message.reply_text("Back to main menu 👑", reply_markup=menu(user_id))
         return
-
-# ---------------- MAIN ----------------
-def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-
-dp.add_handler(CommandHandler("start", start))
-dp.add_handler(MessageHandler(Filters.regex("🛒 Buy UC"), buy))
-dp.add_handler(MessageHandler(Filters.regex("💰 Wallet"), wallet))
-dp.add_handler(MessageHandler(Filters.regex("👑 Admin Panel"), admin_panel))
-dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
-
-    updater.start_polling()
-    updater.idle()
-
-
 def admin_panel(update, context):
     user_id = update.effective_user.id
 
-    if user_id != 255196166:
+    if user_id != ADMIN_ID:
         update.message.reply_text("❌ Access Denied")
         return
 
@@ -302,6 +286,23 @@ def admin_panel(update, context):
 💰 Total Income: {income} USDT
 """
     )
+
+# ---------------- MAIN ----------------
+def main():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+dp.add_handler(CommandHandler("start", start))
+dp.add_handler(MessageHandler(Filters.regex("🛒 Buy UC"), buy))
+dp.add_handler(MessageHandler(Filters.regex("💰 Wallet"), wallet))
+dp.add_handler(MessageHandler(Filters.regex("👑 Admin Panel"), admin_panel))
+dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
+
+    updater.start_polling()
+    updater.idle()
+
+
+
 
 if __name__ == "__main__":
     main()
