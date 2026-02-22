@@ -208,16 +208,16 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.regex("🛒 Buy UC"), buy))
     dp.add_handler(MessageHandler(Filters.regex("💰 Wallet"), wallet))
-    dp.add_handler(MessageHandler(Filters.regex("💳 Charge Wallet"), charge))
-    dp.add_handler(CallbackQueryHandler(buttons))
+    dp.add_handler(MessageHandler(Filters.regex("^👑 Admin Panel$"), admin_panel))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text))
 
     updater.start_polling()
     updater.idle()
+
+
 def admin_panel(update, context):
     user_id = update.effective_user.id
-
-    if user_id != ADMIN_ID:
+    if user_id != ADMIN_ID = 255196166
         update.message.reply_text("❌ Access Denied")
         return
 
