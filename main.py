@@ -97,7 +97,7 @@ def buttons(update, context):
         query.edit_message_text("✅ Charge Approved")
         return
 
-    # BUY
+    # BUY UC
     if query.data.startswith("buy_"):
         pkg = query.data.split("_")[1]
         user_id = query.from_user.id
@@ -160,7 +160,7 @@ def text_handler(update, context):
                 return
 
             admin_state[user_id] = {"step": "code", "package": text}
-            update.message.reply_text("Now send codes (multiple lines or TXT file)")
+            update.message.reply_text("Send codes (multiple lines or TXT file)")
             return
 
         if user_id in admin_state and admin_state[user_id]["step"] == "code":
@@ -196,6 +196,7 @@ def text_handler(update, context):
     if user_state.get(user_id) == "charge":
         try:
             amount = float(text)
+
             cursor.execute("INSERT INTO charge_requests (user_id, amount, status) VALUES (?, ?, 'pending')", (user_id, amount))
             conn.commit()
 
@@ -208,6 +209,7 @@ def text_handler(update, context):
 
             update.message.reply_text("Waiting for approval")
             del user_state[user_id]
+
         except:
             update.message.reply_text("Send valid number ❌")
 
@@ -270,7 +272,9 @@ def main():
     dp.add_handler(MessageHandler(Filters.document, handle_document))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
 
-    updater.start_polling()
+    # 🔥 Production Stable Polling
+    updater.bot.delete_webhook(drop_pending_updates=True)
+    updater.start_polling(drop_pending_updates=True, timeout=30, clean=True)
     updater.idle()
 
 if __name__ == "__main__":
