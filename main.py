@@ -166,36 +166,54 @@ def text_handler(update, context):
             return
 
         if context.user_data.get("step") == "code":
-            pkg = context.user_data["package"]
+    pkg = context.user_data["package"]
 
-            codes_list = text.replace(",", " ").split()
+    import re
 
-            added = 0
-            duplicate = 0
+    # حذف کاراکترهای مخفی تلگرام
+    clean_text = text.replace("\u200b", "").replace("\ufeff", "")
 
-            for code in codes_list:
-                code = code.strip()
-                if not code:
-                    continue
-                cursor.execute(
-                    "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
-                    (code, pkg)
-                )
-                if cursor.rowcount == 1:
-                    added += 1
-                else:
-                    duplicate += 1
+    # جدا کردن با هر نوع فاصله، خط جدید، کاما، سمیکالن
+    codes_list = re.split(r'[,\s;]+', clean_text)
 
-            conn.commit()
-            context.user_data.clear()
+    added = 0
+    duplicate = 0
 
-            cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
-            stock = cursor.fetchone()[0]
+    for code in codes_list:
+        code = code.strip()
 
-            update.message.reply_text(
-                f"✅ Added: {added}\n⚠️ Duplicate: {duplicate}\n📦 Stock ({pkg} UC): {stock}"
-            )
-            return
+        # فقط کدهای معتبر (حداقل 8 کاراکتر)
+        if len(code) < 8:
+            continue
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
+            (code, pkg)
+        )
+
+        if cursor.rowcount == 1:
+            added += 1
+        else:
+            duplicate += 1
+
+    conn.commit()
+    context.user_data.clear()
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'",
+        (pkg,)
+    )
+    stock = cursor.fetchone()[0]
+
+    update.message.reply_text(
+        f"""
+✅ Added: {added}
+⚠️ Duplicate Skipped: {duplicate}
+
+📦 Current Stock ({pkg} UC): {stock}
+"""
+    )
+    return
 
         if text == "📦 Stock Status":
             msg = "📦 STOCK STATUS\n\n"
