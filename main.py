@@ -1,12 +1,13 @@
 import os
 import sqlite3
+import re
 from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 255196166
 
-CUSTOMER_PRICES = {
+PRICES = {
     "60": 0.89,
     "325": 4.50,
     "660": 8.99,
@@ -42,7 +43,7 @@ def start(update, context):
     user_id = update.effective_user.id
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
-    update.message.reply_text("🔥 Welcome to UC Shop Pro", reply_markup=menu(user_id))
+    update.message.reply_text("🔥 Welcome to UC Shop", reply_markup=menu(user_id))
 
 # ================= WALLET =================
 def wallet(update, context):
@@ -59,13 +60,13 @@ def charge(update, context):
 def buy(update, context):
     keyboard = []
 
-    for pkg in CUSTOMER_PRICES:
+    for pkg in PRICES:
         cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
         stock = cursor.fetchone()[0]
 
         keyboard.append([
             InlineKeyboardButton(
-                f"{pkg} UC - {CUSTOMER_PRICES[pkg]} USDT (Stock: {stock})",
+                f"{pkg} UC - {PRICES[pkg]} USDT (Stock: {stock})",
                 callback_data=f"buy_{pkg}"
             )
         ])
@@ -77,7 +78,7 @@ def buttons(update, context):
     query = update.callback_query
     query.answer()
 
-    # APPROVE CHARGE
+    # Approve Charge
     if query.data.startswith("approve_"):
         uid = int(query.data.split("_")[1])
 
@@ -96,11 +97,11 @@ def buttons(update, context):
         query.edit_message_text("✅ Charge Approved")
         return
 
-    # BUY UC
+    # Buy UC
     if query.data.startswith("buy_"):
         pkg = query.data.split("_")[1]
         user_id = query.from_user.id
-        price = CUSTOMER_PRICES[pkg]
+        price = PRICES[pkg]
 
         cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
         balance = cursor.fetchone()[0]
@@ -138,86 +139,71 @@ def admin_panel(update, context):
         ["🔙 Main Menu"]
     ]
 
-    update.message.reply_text(
-        "👑 ADMIN PANEL",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
+    update.message.reply_text("👑 ADMIN PANEL", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
 
 # ================= TEXT HANDLER =================
 def text_handler(update, context):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # ===== ADMIN SECTION =====
+    # ===== ADMIN =====
     if user_id == ADMIN_ID:
 
         if text == "➕ Add UC Code":
             context.user_data["step"] = "package"
-            update.message.reply_text("Send package number (60,325,660,1800,3850,8100)")
+            update.message.reply_text("Send package (60,325,660,1800,3850,8100)")
             return
 
         if context.user_data.get("step") == "package":
-            if text not in CUSTOMER_PRICES:
-                update.message.reply_text("❌ Invalid package")
+            if text not in PRICES:
+                update.message.reply_text("Invalid package ❌")
                 return
             context.user_data["package"] = text
             context.user_data["step"] = "code"
-            update.message.reply_text("Send codes now (new line / space / comma supported)")
+            update.message.reply_text("Send codes (new line / space / comma supported)")
             return
 
         if context.user_data.get("step") == "code":
-    pkg = context.user_data["package"]
+            pkg = context.user_data["package"]
 
-    import re
+            # حذف کاراکترهای مخفی
+            clean = text.replace("\u200b", "").replace("\ufeff", "")
 
-    # حذف کاراکترهای مخفی تلگرام
-    clean_text = text.replace("\u200b", "").replace("\ufeff", "")
+            # جدا کردن همه نوع جداکننده
+            codes_list = re.split(r'[,\s;]+', clean)
 
-    # جدا کردن با هر نوع فاصله، خط جدید، کاما، سمیکالن
-    codes_list = re.split(r'[,\s;]+', clean_text)
+            added = 0
+            duplicate = 0
 
-    added = 0
-    duplicate = 0
+            for code in codes_list:
+                code = code.strip()
+                if len(code) < 8:
+                    continue
 
-    for code in codes_list:
-        code = code.strip()
+                cursor.execute(
+                    "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
+                    (code, pkg)
+                )
 
-        # فقط کدهای معتبر (حداقل 8 کاراکتر)
-        if len(code) < 8:
-            continue
+                if cursor.rowcount == 1:
+                    added += 1
+                else:
+                    duplicate += 1
 
-        cursor.execute(
-            "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
-            (code, pkg)
-        )
+            conn.commit()
+            context.user_data.clear()
 
-        if cursor.rowcount == 1:
-            added += 1
-        else:
-            duplicate += 1
+            cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
+            stock = cursor.fetchone()[0]
 
-    conn.commit()
-    context.user_data.clear()
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'",
-        (pkg,)
-    )
-    stock = cursor.fetchone()[0]
-
-    update.message.reply_text(
-        f"""
-✅ Added: {added}
-⚠️ Duplicate Skipped: {duplicate}
-
-📦 Current Stock ({pkg} UC): {stock}
-"""
-    )
-    return
+            update.message.reply_text(
+                f"✅ Added: {added}\n⚠️ Duplicate: {duplicate}\n📦 Stock ({pkg} UC): {stock}"
+            )
+            return
 
         if text == "📦 Stock Status":
-            msg = "📦 STOCK STATUS\n\n"
-            for pkg in CUSTOMER_PRICES:
+            msg = "📦 STOCK\n"
+            for pkg in PRICES:
                 cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
                 count = cursor.fetchone()[0]
                 msg += f"{pkg} UC → {count}\n"
@@ -236,21 +222,21 @@ def text_handler(update, context):
             update.message.reply_text("Back", reply_markup=menu(user_id))
             return
 
-    # ===== CHARGE REQUEST =====
+    # ===== CHARGE =====
     if state.get(user_id) == "charge":
         try:
             amount = float(text)
             cursor.execute("INSERT INTO charge_requests (user_id, amount, status) VALUES (?, ?, 'pending')", (user_id, amount))
             conn.commit()
 
-            keyboard = [[InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}")]]
+            keyboard = [[InlineKeyboardButton("Approve", callback_data=f"approve_{user_id}")]]
             context.bot.send_message(
                 ADMIN_ID,
-                f"New Charge Request\nUser: {user_id}\nAmount: {amount}",
+                f"New Charge\nUser: {user_id}\nAmount: {amount}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
-            update.message.reply_text("⏳ Waiting for approval")
+            update.message.reply_text("Waiting for approval")
             state.pop(user_id)
         except:
             update.message.reply_text("Send valid number ❌")
