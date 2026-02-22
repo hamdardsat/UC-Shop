@@ -217,7 +217,8 @@ def main():
 
 def admin_panel(update, context):
     user_id = update.effective_user.id
-    if user_id != ADMIN_ID = 255196166
+
+    if user_id != 255196166
         update.message.reply_text("❌ Access Denied")
         return
 
