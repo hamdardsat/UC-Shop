@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import re
 from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
@@ -26,7 +25,9 @@ cursor.execute("CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINC
 cursor.execute("CREATE TABLE IF NOT EXISTS charge_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, status TEXT)")
 conn.commit()
 
-state = {}
+# 🔥 پایدار برای مرحله ادمین
+admin_state = {}
+user_state = {}
 
 # ================= MENU =================
 def menu(user_id):
@@ -53,7 +54,7 @@ def wallet(update, context):
 
 # ================= CHARGE =================
 def charge(update, context):
-    state[update.effective_user.id] = "charge"
+    user_state[update.effective_user.id] = "charge"
     update.message.reply_text("Send amount to charge:")
 
 # ================= BUY =================
@@ -78,7 +79,7 @@ def buttons(update, context):
     query = update.callback_query
     query.answer()
 
-    # Approve Charge
+    # APPROVE CHARGE
     if query.data.startswith("approve_"):
         uid = int(query.data.split("_")[1])
 
@@ -97,7 +98,7 @@ def buttons(update, context):
         query.edit_message_text("✅ Charge Approved")
         return
 
-    # Buy UC
+    # BUY UC
     if query.data.startswith("buy_"):
         pkg = query.data.split("_")[1]
         user_id = query.from_user.id
@@ -150,34 +151,30 @@ def text_handler(update, context):
     if user_id == ADMIN_ID:
 
         if text == "➕ Add UC Code":
-            context.user_data["step"] = "package"
+            admin_state[user_id] = {"step": "package"}
             update.message.reply_text("Send package (60,325,660,1800,3850,8100)")
             return
 
-        if context.user_data.get("step") == "package":
+        if user_id in admin_state and admin_state[user_id]["step"] == "package":
             if text not in PRICES:
                 update.message.reply_text("Invalid package ❌")
                 return
-            context.user_data["package"] = text
-            context.user_data["step"] = "code"
-            update.message.reply_text("Send codes (new line / space / comma supported)")
+
+            admin_state[user_id] = {"step": "code", "package": text}
+            update.message.reply_text("Now send ALL codes (one per line)")
             return
 
-        if context.user_data.get("step") == "code":
-            pkg = context.user_data["package"]
+        if user_id in admin_state and admin_state[user_id]["step"] == "code":
 
-            # حذف کاراکترهای مخفی
-            clean = text.replace("\u200b", "").replace("\ufeff", "")
-
-            # جدا کردن همه نوع جداکننده
-            codes_list = re.split(r'[,\s;]+', clean)
+            pkg = admin_state[user_id]["package"]
+            codes_list = text.splitlines()
 
             added = 0
             duplicate = 0
 
             for code in codes_list:
                 code = code.strip()
-                if len(code) < 8:
+                if not code:
                     continue
 
                 cursor.execute(
@@ -191,7 +188,7 @@ def text_handler(update, context):
                     duplicate += 1
 
             conn.commit()
-            context.user_data.clear()
+            del admin_state[user_id]
 
             cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
             stock = cursor.fetchone()[0]
@@ -223,7 +220,7 @@ def text_handler(update, context):
             return
 
     # ===== CHARGE =====
-    if state.get(user_id) == "charge":
+    if user_state.get(user_id) == "charge":
         try:
             amount = float(text)
             cursor.execute("INSERT INTO charge_requests (user_id, amount, status) VALUES (?, ?, 'pending')", (user_id, amount))
@@ -237,7 +234,7 @@ def text_handler(update, context):
             )
 
             update.message.reply_text("Waiting for approval")
-            state.pop(user_id)
+            del user_state[user_id]
         except:
             update.message.reply_text("Send valid number ❌")
 
