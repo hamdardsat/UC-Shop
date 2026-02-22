@@ -223,13 +223,14 @@ def admin_panel(update, context):
         return
 
     keyboard = [
-        ["➕ Add Code"],
-        ["📦 Stock Overview"],
-        ["🔙 Back"]
+        ["➕ Add UC Code"],
+        ["📦 Stock Status"],
+        ["📊 Statistics"],
+        ["🔙 Main Menu"]
     ]
 
     update.message.reply_text(
-        "👑 Admin Panel",
+        "👑 ADMIN PANEL",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
