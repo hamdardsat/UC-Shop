@@ -209,7 +209,7 @@ def main():
     dp.add_handler(MessageHandler(Filters.regex("🛒 Buy UC"), buy))
     dp.add_handler(MessageHandler(Filters.regex("💰 Wallet"), wallet))
     dp.add_handler(MessageHandler(Filters.regex("^👑 Admin Panel$"), admin_panel))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
 
     updater.start_polling()
     updater.idle()
