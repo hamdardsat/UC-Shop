@@ -1,6 +1,5 @@
 import os
 import sqlite3
-import time
 from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
@@ -78,7 +77,7 @@ def buttons(update, context):
     query = update.callback_query
     query.answer()
 
-    # ===== APPROVE =====
+    # APPROVE CHARGE
     if query.data.startswith("approve_"):
         uid = int(query.data.split("_")[1])
 
@@ -97,7 +96,7 @@ def buttons(update, context):
         query.edit_message_text("✅ Charge Approved")
         return
 
-    # ===== BUY =====
+    # BUY UC
     if query.data.startswith("buy_"):
         pkg = query.data.split("_")[1]
         user_id = query.from_user.id
@@ -163,35 +162,38 @@ def text_handler(update, context):
                 return
             context.user_data["package"] = text
             context.user_data["step"] = "code"
-            update.message.reply_text("Now send UC codes (one per line)")
+            update.message.reply_text("Send codes now (new line / space / comma supported)")
             return
 
-        # 🔥 MULTI CODE ADD
         if context.user_data.get("step") == "code":
             pkg = context.user_data["package"]
-            codes_list = text.splitlines()
+
+            codes_list = text.replace(",", " ").split()
 
             added = 0
             duplicate = 0
 
-            for c in codes_list:
-                c = c.strip()
-                if not c:
+            for code in codes_list:
+                code = code.strip()
+                if not code:
                     continue
-                try:
-                    cursor.execute(
-                        "INSERT INTO codes (code, amount, status) VALUES (?, ?, 'available')",
-                        (c, pkg)
-                    )
+                cursor.execute(
+                    "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
+                    (code, pkg)
+                )
+                if cursor.rowcount == 1:
                     added += 1
-                except:
+                else:
                     duplicate += 1
 
             conn.commit()
             context.user_data.clear()
 
+            cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
+            stock = cursor.fetchone()[0]
+
             update.message.reply_text(
-                f"✅ Added: {added}\n⚠️ Duplicates: {duplicate}"
+                f"✅ Added: {added}\n⚠️ Duplicate: {duplicate}\n📦 Stock ({pkg} UC): {stock}"
             )
             return
 
@@ -209,13 +211,11 @@ def text_handler(update, context):
             users = cursor.fetchone()[0]
             cursor.execute("SELECT SUM(price) FROM sales")
             income = cursor.fetchone()[0] or 0
-            update.message.reply_text(
-                f"📊 STATISTICS\n\n👤 Users: {users}\n💰 Income: {income} USDT"
-            )
+            update.message.reply_text(f"Users: {users}\nIncome: {income} USDT")
             return
 
         if text == "🔙 Main Menu":
-            update.message.reply_text("Back to main menu", reply_markup=menu(user_id))
+            update.message.reply_text("Back", reply_markup=menu(user_id))
             return
 
     # ===== CHARGE REQUEST =====
@@ -232,7 +232,7 @@ def text_handler(update, context):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
-            update.message.reply_text("⏳ Waiting for admin approval")
+            update.message.reply_text("⏳ Waiting for approval")
             state.pop(user_id)
         except:
             update.message.reply_text("Send valid number ❌")
