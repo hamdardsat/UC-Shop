@@ -1,12 +1,13 @@
 import os
 import sqlite3
+import time
 from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 255196166
 
-PRICES = {
+CUSTOMER_PRICES = {
     "60": 0.89,
     "325": 4.50,
     "660": 8.99,
@@ -25,8 +26,7 @@ cursor.execute("CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINC
 cursor.execute("CREATE TABLE IF NOT EXISTS charge_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, status TEXT)")
 conn.commit()
 
-admin_state = {}
-user_state = {}
+state = {}
 
 # ================= MENU =================
 def menu(user_id):
@@ -43,7 +43,7 @@ def start(update, context):
     user_id = update.effective_user.id
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
-    update.message.reply_text("🔥 Welcome to UC Shop", reply_markup=menu(user_id))
+    update.message.reply_text("🔥 Welcome to UC Shop Pro", reply_markup=menu(user_id))
 
 # ================= WALLET =================
 def wallet(update, context):
@@ -53,20 +53,20 @@ def wallet(update, context):
 
 # ================= CHARGE =================
 def charge(update, context):
-    user_state[update.effective_user.id] = "charge"
+    state[update.effective_user.id] = "charge"
     update.message.reply_text("Send amount to charge:")
 
 # ================= BUY =================
 def buy(update, context):
     keyboard = []
 
-    for pkg in PRICES:
+    for pkg in CUSTOMER_PRICES:
         cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
         stock = cursor.fetchone()[0]
 
         keyboard.append([
             InlineKeyboardButton(
-                f"{pkg} UC - {PRICES[pkg]} USDT (Stock: {stock})",
+                f"{pkg} UC - {CUSTOMER_PRICES[pkg]} USDT (Stock: {stock})",
                 callback_data=f"buy_{pkg}"
             )
         ])
@@ -78,7 +78,7 @@ def buttons(update, context):
     query = update.callback_query
     query.answer()
 
-    # APPROVE CHARGE
+    # ===== APPROVE =====
     if query.data.startswith("approve_"):
         uid = int(query.data.split("_")[1])
 
@@ -97,11 +97,11 @@ def buttons(update, context):
         query.edit_message_text("✅ Charge Approved")
         return
 
-    # BUY UC
+    # ===== BUY =====
     if query.data.startswith("buy_"):
         pkg = query.data.split("_")[1]
         user_id = query.from_user.id
-        price = PRICES[pkg]
+        price = CUSTOMER_PRICES[pkg]
 
         cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
         balance = cursor.fetchone()[0]
@@ -139,77 +139,101 @@ def admin_panel(update, context):
         ["🔙 Main Menu"]
     ]
 
-    update.message.reply_text("👑 ADMIN PANEL", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    update.message.reply_text(
+        "👑 ADMIN PANEL",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
 
 # ================= TEXT HANDLER =================
 def text_handler(update, context):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # ===== ADMIN =====
+    # ===== ADMIN SECTION =====
     if user_id == ADMIN_ID:
 
         if text == "➕ Add UC Code":
-            admin_state[user_id] = {"step": "package"}
-            update.message.reply_text("Send package (60,325,660,1800,3850,8100)")
+            context.user_data["step"] = "package"
+            update.message.reply_text("Send package number (60,325,660,1800,3850,8100)")
             return
 
-        if user_id in admin_state and admin_state[user_id]["step"] == "package":
-            if text not in PRICES:
-                update.message.reply_text("Invalid package ❌")
+        if context.user_data.get("step") == "package":
+            if text not in CUSTOMER_PRICES:
+                update.message.reply_text("❌ Invalid package")
                 return
-
-            admin_state[user_id] = {"step": "code", "package": text}
-            update.message.reply_text("Send codes (multi-line or TXT file)")
+            context.user_data["package"] = text
+            context.user_data["step"] = "code"
+            update.message.reply_text("Now send UC codes (one per line)")
             return
 
-        if user_id in admin_state and admin_state[user_id]["step"] == "code":
-
-            pkg = admin_state[user_id]["package"]
+        # 🔥 MULTI CODE ADD
+        if context.user_data.get("step") == "code":
+            pkg = context.user_data["package"]
             codes_list = text.splitlines()
 
             added = 0
             duplicate = 0
 
-            for code in codes_list:
-                code = code.strip()
-                if not code:
+            for c in codes_list:
+                c = c.strip()
+                if not c:
                     continue
-
-                cursor.execute(
-                    "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
-                    (code, pkg)
-                )
-
-                if cursor.rowcount == 1:
+                try:
+                    cursor.execute(
+                        "INSERT INTO codes (code, amount, status) VALUES (?, ?, 'available')",
+                        (c, pkg)
+                    )
                     added += 1
-                else:
+                except:
                     duplicate += 1
 
             conn.commit()
-            del admin_state[user_id]
+            context.user_data.clear()
 
-            update.message.reply_text(f"✅ Added: {added}\n⚠️ Duplicate: {duplicate}")
+            update.message.reply_text(
+                f"✅ Added: {added}\n⚠️ Duplicates: {duplicate}"
+            )
             return
 
-    # ===== CHARGE =====
-    if user_state.get(user_id) == "charge":
+        if text == "📦 Stock Status":
+            msg = "📦 STOCK STATUS\n\n"
+            for pkg in CUSTOMER_PRICES:
+                cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
+                count = cursor.fetchone()[0]
+                msg += f"{pkg} UC → {count}\n"
+            update.message.reply_text(msg)
+            return
+
+        if text == "📊 Statistics":
+            cursor.execute("SELECT COUNT(*) FROM users")
+            users = cursor.fetchone()[0]
+            cursor.execute("SELECT SUM(price) FROM sales")
+            income = cursor.fetchone()[0] or 0
+            update.message.reply_text(
+                f"📊 STATISTICS\n\n👤 Users: {users}\n💰 Income: {income} USDT"
+            )
+            return
+
+        if text == "🔙 Main Menu":
+            update.message.reply_text("Back to main menu", reply_markup=menu(user_id))
+            return
+
+    # ===== CHARGE REQUEST =====
+    if state.get(user_id) == "charge":
         try:
             amount = float(text)
-
             cursor.execute("INSERT INTO charge_requests (user_id, amount, status) VALUES (?, ?, 'pending')", (user_id, amount))
             conn.commit()
 
-            keyboard = [[InlineKeyboardButton("Approve", callback_data=f"approve_{user_id}")]]
+            keyboard = [[InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}")]]
             context.bot.send_message(
                 ADMIN_ID,
-                f"New Charge\nUser: {user_id}\nAmount: {amount}",
+                f"New Charge Request\nUser: {user_id}\nAmount: {amount}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
-            update.message.reply_text("Waiting for approval")
-            del user_state[user_id]
-
+            update.message.reply_text("⏳ Waiting for admin approval")
+            state.pop(user_id)
         except:
             update.message.reply_text("Send valid number ❌")
 
@@ -226,9 +250,7 @@ def main():
     dp.add_handler(CallbackQueryHandler(buttons))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
 
-    # 🔥 Production Stable Polling (Correct)
-    updater.bot.delete_webhook(drop_pending_updates=True)
-    updater.start_polling(drop_pending_updates=True, timeout=30)
+    updater.start_polling()
     updater.idle()
 
 if __name__ == "__main__":
