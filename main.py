@@ -222,7 +222,16 @@ def admin_panel(update, context):
         update.message.reply_text("❌ Access Denied")
         return
 
-    update.message.reply_text("👑 Welcome Admin")
+    keyboard = [
+        ["➕ Add Code"],
+        ["📦 Stock Overview"],
+        ["🔙 Back"]
+    ]
+
+    update.message.reply_text(
+        "👑 Admin Panel",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
 
     cursor.execute("SELECT COUNT(*) FROM users")
     users = cursor.fetchone()[0]
