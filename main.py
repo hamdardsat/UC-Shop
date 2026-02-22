@@ -25,7 +25,6 @@ cursor.execute("CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINC
 cursor.execute("CREATE TABLE IF NOT EXISTS charge_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, status TEXT)")
 conn.commit()
 
-# 🔥 پایدار برای مرحله ادمین
 admin_state = {}
 user_state = {}
 
@@ -98,7 +97,7 @@ def buttons(update, context):
         query.edit_message_text("✅ Charge Approved")
         return
 
-    # BUY UC
+    # BUY
     if query.data.startswith("buy_"):
         pkg = query.data.split("_")[1]
         user_id = query.from_user.id
@@ -161,7 +160,7 @@ def text_handler(update, context):
                 return
 
             admin_state[user_id] = {"step": "code", "package": text}
-            update.message.reply_text("Now send ALL codes (one per line)")
+            update.message.reply_text("Now send codes (multiple lines or TXT file)")
             return
 
         if user_id in admin_state and admin_state[user_id]["step"] == "code":
@@ -190,33 +189,7 @@ def text_handler(update, context):
             conn.commit()
             del admin_state[user_id]
 
-            cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
-            stock = cursor.fetchone()[0]
-
-            update.message.reply_text(
-                f"✅ Added: {added}\n⚠️ Duplicate: {duplicate}\n📦 Stock ({pkg} UC): {stock}"
-            )
-            return
-
-        if text == "📦 Stock Status":
-            msg = "📦 STOCK\n"
-            for pkg in PRICES:
-                cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
-                count = cursor.fetchone()[0]
-                msg += f"{pkg} UC → {count}\n"
-            update.message.reply_text(msg)
-            return
-
-        if text == "📊 Statistics":
-            cursor.execute("SELECT COUNT(*) FROM users")
-            users = cursor.fetchone()[0]
-            cursor.execute("SELECT SUM(price) FROM sales")
-            income = cursor.fetchone()[0] or 0
-            update.message.reply_text(f"Users: {users}\nIncome: {income} USDT")
-            return
-
-        if text == "🔙 Main Menu":
-            update.message.reply_text("Back", reply_markup=menu(user_id))
+            update.message.reply_text(f"✅ Added: {added}\n⚠️ Duplicate: {duplicate}")
             return
 
     # ===== CHARGE =====
@@ -238,6 +211,51 @@ def text_handler(update, context):
         except:
             update.message.reply_text("Send valid number ❌")
 
+# ================= DOCUMENT HANDLER =================
+def handle_document(update, context):
+    user_id = update.effective_user.id
+
+    if user_id != ADMIN_ID:
+        return
+
+    if user_id not in admin_state or admin_state[user_id]["step"] != "code":
+        update.message.reply_text("❌ First choose package")
+        return
+
+    file = update.message.document
+    if not file.file_name.endswith(".txt"):
+        update.message.reply_text("❌ Only TXT allowed")
+        return
+
+    pkg = admin_state[user_id]["package"]
+
+    file_obj = file.get_file()
+    content = file_obj.download_as_bytearray().decode("utf-8")
+    codes_list = content.splitlines()
+
+    added = 0
+    duplicate = 0
+
+    for code in codes_list:
+        code = code.strip()
+        if not code:
+            continue
+
+        cursor.execute(
+            "INSERT OR IGNORE INTO codes (code, amount, status) VALUES (?, ?, 'available')",
+            (code, pkg)
+        )
+
+        if cursor.rowcount == 1:
+            added += 1
+        else:
+            duplicate += 1
+
+    conn.commit()
+    del admin_state[user_id]
+
+    update.message.reply_text(f"✅ Upload Complete\nAdded: {added}\nDuplicate: {duplicate}")
+
 # ================= MAIN =================
 def main():
     updater = Updater(TOKEN, use_context=True)
@@ -249,6 +267,7 @@ def main():
     dp.add_handler(MessageHandler(Filters.regex("💳 Charge Wallet"), charge))
     dp.add_handler(MessageHandler(Filters.regex("👑 Admin Panel"), admin_panel))
     dp.add_handler(CallbackQueryHandler(buttons))
+    dp.add_handler(MessageHandler(Filters.document, handle_document))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
 
     updater.start_polling()
