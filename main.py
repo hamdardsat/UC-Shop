@@ -5,88 +5,112 @@ from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMa
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 7223910819
-
-PACKAGES = [60, 325, 660, 1800, 3850, 8100]
+ADMIN_ID = 255196166
 
 CUSTOMER_PRICES = {
-    60: 0.89,
-    325: 4.50,
-    660: 8.99,
-    1800: 22.50,
-    3850: 44.50,
-    8100: 89.00
+    "60": 0.89,
+    "325": 4.50,
+    "660": 8.99,
+    "1800": 22.50,
+    "3850": 44.50,
+    "8100": 89.00
 }
 
 SELLER_PRICES = {
-    60: 0.87,
-    325: 4.42,
-    660: 8.85,
-    1800: 22.12,
-    3850: 44.00,
-    8100: 88.00
+    "60": 0.87,
+    "325": 4.42,
+    "660": 8.85,
+    "1800": 22.12,
+    "3850": 44.00,
+    "8100": 88.00
 }
 
-# ---------------- DATABASE ----------------
+# ================= DATABASE =================
 conn = sqlite3.connect("database.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, balance REAL DEFAULT 0)")
-cursor.execute("CREATE TABLE IF NOT EXISTS sellers (user_id INTEGER PRIMARY KEY, approved INTEGER DEFAULT 0)")
-cursor.execute("CREATE TABLE IF NOT EXISTS codes (code TEXT PRIMARY KEY, amount INTEGER, status TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINCREMENT, buyer_id INTEGER, amount INTEGER, price REAL)")
+cursor.execute("CREATE TABLE IF NOT EXISTS codes (code TEXT PRIMARY KEY, amount TEXT, status TEXT)")
+cursor.execute("CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY AUTOINCREMENT, buyer_id INTEGER, amount TEXT, price REAL)")
+cursor.execute("CREATE TABLE IF NOT EXISTS charge_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, status TEXT)")
 conn.commit()
 
+state = {}
 last_purchase = {}
 
-# ---------------- MENU ----------------
+# ================= MENU =================
 def menu(user_id):
-    keyboard = [["🛒 Buy UC", "💰 Wallet"]]
+    keyboard = [["🛒 Buy UC", "💰 Wallet"],
+                ["💳 Charge Wallet"]]
 
     if user_id == ADMIN_ID:
         keyboard.append(["👑 Admin Panel"])
 
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# ---------------- START ----------------
+# ================= START =================
 def start(update, context):
     user_id = update.effective_user.id
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
     update.message.reply_text("🔥 Welcome to UC Shop Pro", reply_markup=menu(user_id))
 
-# ---------------- WALLET ----------------
+# ================= WALLET =================
 def wallet(update, context):
     cursor.execute("SELECT balance FROM users WHERE user_id=?", (update.effective_user.id,))
     balance = cursor.fetchone()[0]
     update.message.reply_text(f"💰 Balance: {balance} USDT")
 
-# ---------------- BUY ----------------
+# ================= CHARGE =================
+def charge(update, context):
+    state[update.effective_user.id] = "charge"
+    update.message.reply_text("Send amount to charge:")
+
+# ================= BUY =================
 def buy(update, context):
     keyboard = []
 
-    for pkg in PACKAGES:
-        price = CUSTOMER_PRICES[pkg]
+    for pkg in CUSTOMER_PRICES:
         cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
         stock = cursor.fetchone()[0]
 
         keyboard.append([
             InlineKeyboardButton(
-                f"{pkg} UC - {price} USDT (Stock: {stock})",
+                f"{pkg} UC - {CUSTOMER_PRICES[pkg]} USDT (Stock: {stock})",
                 callback_data=f"buy_{pkg}"
             )
         ])
 
     update.message.reply_text("Select package:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ---------------- BUTTONS ----------------
+# ================= BUTTONS =================
 def buttons(update, context):
     query = update.callback_query
     query.answer()
     user_id = query.from_user.id
 
+    # ===== APPROVE CHARGE =====
+    if query.data.startswith("approve_"):
+        uid = int(query.data.split("_")[1])
+
+        cursor.execute("SELECT amount FROM charge_requests WHERE user_id=? AND status='pending'", (uid,))
+        data = cursor.fetchone()
+        if not data:
+            query.edit_message_text("Already processed ❌")
+            return
+
+        amount = data[0]
+
+        cursor.execute("UPDATE users SET balance=balance+? WHERE user_id=?", (amount, uid))
+        cursor.execute("UPDATE charge_requests SET status='approved' WHERE user_id=? AND status='pending'", (uid,))
+        conn.commit()
+
+        query.edit_message_text("✅ Charge Approved")
+        return
+
+    # ===== BUY =====
     if query.data.startswith("buy_"):
-        pkg = int(query.data.split("_")[1])
+        pkg = query.data.split("_")[1]
         price = CUSTOMER_PRICES[pkg]
 
         cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
@@ -110,24 +134,84 @@ def buttons(update, context):
         cursor.execute("INSERT INTO sales (buyer_id, amount, price) VALUES (?, ?, ?)", (user_id, pkg, price))
         conn.commit()
 
-        query.edit_message_text(
-            f"🎉 UC Delivered Successfully!\n\n📋 Your Code:\n\n`{code}`",
-            parse_mode="Markdown"
-        )
+        query.edit_message_text(f"🎁 UC Code:\n\n`{code}`", parse_mode="Markdown")
 
-# ---------------- ADMIN PANEL ----------------
-def admin_panel(update, context):
+# ================= TEXT HANDLER =================
+def text_handler(update, context):
     user_id = update.effective_user.id
+    text = update.message.text.strip()
 
-    if user_id != ADMIN_ID:
+    # ===== ADMIN PANEL =====
+    if user_id == ADMIN_ID:
+
+        if text == "➕ Add UC Code":
+            context.user_data["step"] = "package"
+            update.message.reply_text("Send package number (60,325,660,1800,3850,8100)")
+            return
+
+        if context.user_data.get("step") == "package":
+            if text not in CUSTOMER_PRICES:
+                update.message.reply_text("Invalid package ❌")
+                return
+            context.user_data["package"] = text
+            context.user_data["step"] = "code"
+            update.message.reply_text("Send UC code:")
+            return
+
+        if context.user_data.get("step") == "code":
+            pkg = context.user_data["package"]
+            cursor.execute("INSERT INTO codes (code, amount, status) VALUES (?, ?, 'available')", (text, pkg))
+            conn.commit()
+            context.user_data.clear()
+            update.message.reply_text("✅ Code Added")
+            return
+
+        if text == "📦 Stock Status":
+            msg = "📦 STOCK\n"
+            for pkg in CUSTOMER_PRICES:
+                cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
+                count = cursor.fetchone()[0]
+                msg += f"{pkg} UC → {count}\n"
+            update.message.reply_text(msg)
+            return
+
+        if text == "📊 Statistics":
+            cursor.execute("SELECT COUNT(*) FROM users")
+            users = cursor.fetchone()[0]
+            cursor.execute("SELECT SUM(price) FROM sales")
+            income = cursor.fetchone()[0] or 0
+            update.message.reply_text(f"Users: {users}\nIncome: {income} USDT")
+            return
+
+    # ===== CHARGE REQUEST =====
+    if state.get(user_id) == "charge":
+        try:
+            amount = float(text)
+            cursor.execute("INSERT INTO charge_requests (user_id, amount, status) VALUES (?, ?, 'pending')", (user_id, amount))
+            conn.commit()
+
+            keyboard = [[InlineKeyboardButton("✅ Approve", callback_data=f"approve_{user_id}")]]
+            context.bot.send_message(
+                ADMIN_ID,
+                f"New Charge Request\nUser: {user_id}\nAmount: {amount}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+            update.message.reply_text("⏳ Waiting for admin approval")
+            state.pop(user_id)
+        except:
+            update.message.reply_text("Send valid number ❌")
+
+# ================= ADMIN PANEL =================
+def admin_panel(update, context):
+    if update.effective_user.id != ADMIN_ID:
         update.message.reply_text("❌ Access Denied")
         return
 
     keyboard = [
         ["➕ Add UC Code"],
         ["📦 Stock Status"],
-        ["📊 Statistics"],
-        ["🔙 Main Menu"]
+        ["📊 Statistics"]
     ]
 
     update.message.reply_text(
@@ -135,61 +219,7 @@ def admin_panel(update, context):
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-# ---------------- ADMIN TEXT HANDLER ----------------
-def text_handler(update, context):
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    if user_id != ADMIN_ID:
-        return
-
-    if text == "➕ Add UC Code":
-        context.user_data["step"] = "package"
-        update.message.reply_text("Send package number:\n60 / 325 / 660 / 1800 / 3850 / 8100")
-        return
-
-    if context.user_data.get("step") == "package":
-        package = int(text)
-        if package not in PACKAGES:
-            update.message.reply_text("❌ Invalid package")
-            return
-        context.user_data["package"] = package
-        context.user_data["step"] = "code"
-        update.message.reply_text("Now send the UC code:")
-        return
-
-    if context.user_data.get("step") == "code":
-        package = context.user_data["package"]
-        cursor.execute(
-            "INSERT INTO codes (code, amount, status) VALUES (?, ?, 'available')",
-            (text, package)
-        )
-        conn.commit()
-        context.user_data.clear()
-        update.message.reply_text("✅ Code Added Successfully")
-        return
-
-    if text == "📦 Stock Status":
-        msg = "📦 STOCK STATUS\n\n"
-        for pkg in PACKAGES:
-            cursor.execute("SELECT COUNT(*) FROM codes WHERE amount=? AND status='available'", (pkg,))
-            count = cursor.fetchone()[0]
-            msg += f"{pkg} UC → {count}\n"
-        update.message.reply_text(msg)
-        return
-
-    if text == "📊 Statistics":
-        cursor.execute("SELECT COUNT(*) FROM users")
-        users = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM sales")
-        sales = cursor.fetchone()[0]
-        update.message.reply_text(f"📊 Statistics\n\nUsers: {users}\nSales: {sales}")
-        return
-
-    if text == "🔙 Main Menu":
-        update.message.reply_text("Back to main menu", reply_markup=menu(user_id))
-
-# ---------------- MAIN ----------------
+# ================= MAIN =================
 def main():
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
@@ -197,6 +227,7 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.regex("🛒 Buy UC"), buy))
     dp.add_handler(MessageHandler(Filters.regex("💰 Wallet"), wallet))
+    dp.add_handler(MessageHandler(Filters.regex("💳 Charge Wallet"), charge))
     dp.add_handler(MessageHandler(Filters.regex("👑 Admin Panel"), admin_panel))
     dp.add_handler(CallbackQueryHandler(buttons))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
