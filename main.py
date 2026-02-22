@@ -5,7 +5,7 @@ from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMa
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 255196166
+ADMIN_ID = 255196166:
 
 PACKAGES = [60, 325, 660, 1800, 3850, 8100]
 
