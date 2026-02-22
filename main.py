@@ -5,7 +5,7 @@ from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMa
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 255196166  # 👈 آیدی عددی خودت
+255196166 = 255196166  # 👈 آیدی عددی خودت
 
 CUSTOMER_PRICES = {
     "60": 0.89,
@@ -255,11 +255,11 @@ def main():
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.regex("🛒 Buy UC"), buy))
-    dp.add_handler(MessageHandler(Filters.regex("💰 Wallet"), wallet))
-    dp.add_handler(MessageHandler(Filters.regex("^👑 Admin Panel$"), admin_panel))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
+dp.add_handler(CommandHandler("start", start))
+dp.add_handler(MessageHandler(Filters.regex("🛒 Buy UC"), buy))
+dp.add_handler(MessageHandler(Filters.regex("💰 Wallet"), wallet))
+dp.add_handler(MessageHandler(Filters.regex("👑 Admin Panel"), admin_panel))
+dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
 
     updater.start_polling()
     updater.idle()
