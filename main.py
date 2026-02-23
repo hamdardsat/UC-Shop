@@ -5,6 +5,8 @@ from telegram import ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 255196166  # آیدی عددی خودت را بگذار
+
 PACKAGES = ["60", "325", "660", "1800", "3850", "8100"]
 
 # ================= DATABASE =================
@@ -60,11 +62,12 @@ def start(update, context):
     if update.effective_chat.type not in ["group", "supergroup"]:
         return
 
-    admins = update.effective_chat.get_administrators()
-    admin_ids = [a.user.id for a in admins]
-    is_admin = update.effective_user.id in admin_ids
+    is_admin = update.effective_user.id == ADMIN_ID
 
-    update.message.reply_text("UC Group Bot Ready 👑", reply_markup=main_menu(is_admin))
+    update.message.reply_text(
+        "UC Group Bot Ready 👑",
+        reply_markup=main_menu(is_admin)
+    )
 
 # ================= TEXT HANDLER =================
 def text_handler(update, context):
@@ -73,10 +76,7 @@ def text_handler(update, context):
 
     user = update.effective_user
     text = update.message.text.strip()
-
-    admins = update.effective_chat.get_administrators()
-    admin_ids = [a.user.id for a in admins]
-    is_admin = user.id in admin_ids
+    is_admin = user.id == ADMIN_ID
 
     # ===== ADD BUTTON =====
     if text == "➕ Add Codes" and is_admin:
@@ -90,14 +90,17 @@ def text_handler(update, context):
         update.message.reply_text("Cancelled", reply_markup=main_menu(is_admin))
         return
 
-    # ===== PACKAGE SELECT =====
+    # ===== PACKAGE SELECT SAFE =====
     if user.id in admin_state and admin_state[user.id]["step"] == "select_package":
-        if text not in PACKAGES:
-            update.message.reply_text("Invalid package")
+
+        selected_package = re.sub(r'\D', '', text.strip())
+
+        if selected_package not in PACKAGES:
+            update.message.reply_text("Invalid package ❌")
             return
 
-        admin_state[user.id] = {"step": "add_codes", "package": text}
-        update.message.reply_text(f"Send ALL codes for {text} UC")
+        admin_state[user.id] = {"step": "add_codes", "package": selected_package}
+        update.message.reply_text(f"Send ALL codes for {selected_package} UC")
         return
 
     # ===== ADD MULTIPLE CODES SAFE =====
@@ -119,6 +122,7 @@ def text_handler(update, context):
 
         for code in codes:
             code = code.strip()
+
             if len(code) < 5:
                 continue
 
@@ -144,7 +148,7 @@ def text_handler(update, context):
 
     # ===== DELIVER CODE =====
     if text.startswith("📦"):
-        package = text.replace("📦", "").replace("UC", "").strip()
+        package = re.sub(r'\D', '', text)
         deliver_code(update, package)
         return
 
@@ -155,6 +159,10 @@ def text_handler(update, context):
 
 # ================= DELIVER CODE =================
 def deliver_code(update, package):
+
+    if package not in PACKAGES:
+        return
+
     cursor.execute(
         "SELECT code FROM codes WHERE package=? AND status='available' LIMIT 1",
         (package,)
