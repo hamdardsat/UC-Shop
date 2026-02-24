@@ -7,77 +7,104 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 255196166
-FILE_NAME = "codes.txt"
+
+PACKAGES = ["60", "325", "660", "1800", "3850", "8100"]
+
+DATA_FOLDER = "data"
 BACKUP_FOLDER = "backups"
 
 admin_mode = False
+selected_package = None
 
-# ===== CREATE BACKUP =====
-def create_backup():
-    if not os.path.exists(FILE_NAME):
-        return
+# ===== SETUP FOLDERS =====
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
 
-    if not os.path.exists(BACKUP_FOLDER):
-        os.makedirs(BACKUP_FOLDER)
+if not os.path.exists(BACKUP_FOLDER):
+    os.makedirs(BACKUP_FOLDER)
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    backup_file = os.path.join(BACKUP_FOLDER, f"backup_{timestamp}.txt")
+# ===== FILE PATH =====
+def file_path(pkg):
+    return os.path.join(DATA_FOLDER, f"{pkg}.txt")
 
-    shutil.copy(FILE_NAME, backup_file)
-
-    # فقط 5 بکاپ آخر نگه دارد
-    backups = sorted(os.listdir(BACKUP_FOLDER))
-    if len(backups) > 5:
-        os.remove(os.path.join(BACKUP_FOLDER, backups[0]))
-
-# ===== LOAD CODES =====
-def load_codes():
-    if not os.path.exists(FILE_NAME):
+# ===== LOAD =====
+def load_codes(pkg):
+    path = file_path(pkg)
+    if not os.path.exists(path):
         return []
-    with open(FILE_NAME, "r") as f:
+    with open(path, "r") as f:
         return [line.strip() for line in f if line.strip()]
 
-# ===== SAVE CODES =====
-def save_codes(codes):
-    with open(FILE_NAME, "w") as f:
+# ===== SAVE =====
+def save_codes(pkg, codes):
+    path = file_path(pkg)
+    with open(path, "w") as f:
         for code in codes:
             f.write(code + "\n")
+    create_backup(pkg)
 
-    create_backup()
+# ===== BACKUP =====
+def create_backup(pkg):
+    src = file_path(pkg)
+    if not os.path.exists(src):
+        return
 
-# ===== MENU =====
-def menu():
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    dst = os.path.join(BACKUP_FOLDER, f"{pkg}_{timestamp}.txt")
+    shutil.copy(src, dst)
+
+# ===== MENUS =====
+def main_menu():
     keyboard = [
         ["➕ Add Codes"],
-        ["🎁 Get Code"]
+        ["🎁 Get Code"],
+        ["📦 Stock"]
     ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def package_menu():
+    keyboard = []
+    row = []
+    for pkg in PACKAGES:
+        row.append(pkg)
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append(["🔙 Cancel"])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # ===== START =====
 def start(update, context):
-    update.message.reply_text("UC Manager with Auto Backup 👑", reply_markup=menu())
+    update.message.reply_text("UC Package Manager 👑", reply_markup=main_menu())
 
 # ===== TEXT HANDLER =====
 def text_handler(update, context):
-    global admin_mode
+    global admin_mode, selected_package
 
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # ===== ADD MODE =====
+    # ===== ADD =====
     if text == "➕ Add Codes" and user_id == ADMIN_ID:
         admin_mode = True
-        update.message.reply_text("Send all codes now (multi-line supported)")
+        update.message.reply_text("Select package:", reply_markup=package_menu())
         return
 
-    if admin_mode and user_id == ADMIN_ID:
+    if admin_mode and text in PACKAGES:
+        selected_package = text
+        update.message.reply_text(f"Send codes for {text} UC")
+        return
+
+    if admin_mode and selected_package and user_id == ADMIN_ID:
 
         try:
             update.message.delete()
         except:
             pass
 
-        codes = load_codes()
+        codes = load_codes(selected_package)
 
         clean_text = text.replace("\u200b", "").replace("\ufeff", "")
         new_codes = re.split(r'\s+', clean_text)
@@ -93,30 +120,46 @@ def text_handler(update, context):
                 codes.append(code)
                 added += 1
 
-        save_codes(codes)
-        admin_mode = False
+        save_codes(selected_package, codes)
 
-        context.bot.send_message(
-            update.effective_chat.id,
-            f"✅ {added} Codes Added\n📦 Total Stored: {len(codes)}"
+        update.message.reply_text(
+            f"✅ {added} Codes Added to {selected_package}\n📦 Total: {len(codes)}",
+            reply_markup=main_menu()
         )
+
+        admin_mode = False
+        selected_package = None
         return
 
     # ===== GET CODE =====
     if text == "🎁 Get Code":
+        update.message.reply_text("Select package:", reply_markup=package_menu())
+        return
 
-        codes = load_codes()
+    if text in PACKAGES:
+        codes = load_codes(text)
 
         if not codes:
-            update.message.reply_text("❌ No codes available")
+            update.message.reply_text("❌ Out of stock", reply_markup=main_menu())
             return
 
         code = codes.pop(0)
-        save_codes(codes)
+        save_codes(text, codes)
 
         update.message.reply_text(
-            f"🎁 Your Code:\n{code}\n\n📦 Remaining: {len(codes)}"
+            f"🎁 {text} UC Code:\n{code}\n\n📦 Remaining: {len(codes)}",
+            reply_markup=main_menu()
         )
+        return
+
+    # ===== STOCK =====
+    if text == "📦 Stock":
+        message = "📦 STOCK STATUS\n\n"
+        for pkg in PACKAGES:
+            count = len(load_codes(pkg))
+            message += f"{pkg} UC → {count}\n"
+        update.message.reply_text(message)
+        return
 
 # ===== MAIN =====
 def main():
