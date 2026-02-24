@@ -1,214 +1,124 @@
 import os
-import sqlite3
 import re
+import shutil
+from datetime import datetime
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 255196166  # آیدی عددی خودت را بگذار
+ADMIN_ID = 255196166
+FILE_NAME = "codes.txt"
+BACKUP_FOLDER = "backups"
 
-PACKAGES = ["60", "325", "660", "1800", "3850", "8100"]
+admin_mode = False
 
-# ================= DATABASE =================
-conn = sqlite3.connect("codes.db", check_same_thread=False)
-cursor = conn.cursor()
+# ===== CREATE BACKUP =====
+def create_backup():
+    if not os.path.exists(FILE_NAME):
+        return
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS codes (
-    code TEXT PRIMARY KEY,
-    package TEXT,
-    status TEXT
-)
-""")
+    if not os.path.exists(BACKUP_FOLDER):
+        os.makedirs(BACKUP_FOLDER)
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    username TEXT,
-    package TEXT,
-    code TEXT,
-    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    backup_file = os.path.join(BACKUP_FOLDER, f"backup_{timestamp}.txt")
 
-conn.commit()
+    shutil.copy(FILE_NAME, backup_file)
 
-admin_state = {}
+    # فقط 5 بکاپ آخر نگه دارد
+    backups = sorted(os.listdir(BACKUP_FOLDER))
+    if len(backups) > 5:
+        os.remove(os.path.join(BACKUP_FOLDER, backups[0]))
 
-# ================= MENUS =================
-def main_menu(is_admin=False):
+# ===== LOAD CODES =====
+def load_codes():
+    if not os.path.exists(FILE_NAME):
+        return []
+    with open(FILE_NAME, "r") as f:
+        return [line.strip() for line in f if line.strip()]
+
+# ===== SAVE CODES =====
+def save_codes(codes):
+    with open(FILE_NAME, "w") as f:
+        for code in codes:
+            f.write(code + "\n")
+
+    create_backup()
+
+# ===== MENU =====
+def menu():
     keyboard = [
-        ["📦 60 UC", "📦 325 UC"],
-        ["📦 660 UC", "📦 1800 UC"],
-        ["📦 3850 UC", "📦 8100 UC"],
-        ["📊 Stock"]
-    ]
-    if is_admin:
-        keyboard.append(["➕ Add Codes"])
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-def package_menu():
-    keyboard = [
-        ["60", "325"],
-        ["660", "1800"],
-        ["3850", "8100"],
-        ["🔙 Cancel"]
+        ["➕ Add Codes"],
+        ["🎁 Get Code"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# ================= START =================
+# ===== START =====
 def start(update, context):
-    if update.effective_chat.type not in ["group", "supergroup"]:
-        return
+    update.message.reply_text("UC Manager with Auto Backup 👑", reply_markup=menu())
 
-    is_admin = update.effective_user.id == ADMIN_ID
-
-    update.message.reply_text(
-        "UC Group Bot Ready 👑",
-        reply_markup=main_menu(is_admin)
-    )
-
-# ================= TEXT HANDLER =================
+# ===== TEXT HANDLER =====
 def text_handler(update, context):
-    if update.effective_chat.type not in ["group", "supergroup"]:
-        return
+    global admin_mode
 
-    user = update.effective_user
+    user_id = update.effective_user.id
     text = update.message.text.strip()
-    is_admin = user.id == ADMIN_ID
 
-    # ===== ADD BUTTON =====
-    if text == "➕ Add Codes" and is_admin:
-        admin_state[user.id] = {"step": "select_package"}
-        update.message.reply_text("Select package:", reply_markup=package_menu())
+    # ===== ADD MODE =====
+    if text == "➕ Add Codes" and user_id == ADMIN_ID:
+        admin_mode = True
+        update.message.reply_text("Send all codes now (multi-line supported)")
         return
 
-    # ===== CANCEL =====
-    if text == "🔙 Cancel":
-        admin_state.pop(user.id, None)
-        update.message.reply_text("Cancelled", reply_markup=main_menu(is_admin))
-        return
+    if admin_mode and user_id == ADMIN_ID:
 
-    # ===== PACKAGE SELECT SAFE =====
-    if user.id in admin_state and admin_state[user.id]["step"] == "select_package":
-
-        selected_package = re.sub(r'\D', '', text.strip())
-
-        if selected_package not in PACKAGES:
-            update.message.reply_text("Invalid package ❌")
-            return
-
-        admin_state[user.id] = {"step": "add_codes", "package": selected_package}
-        update.message.reply_text(f"Send ALL codes for {selected_package} UC")
-        return
-
-    # ===== ADD MULTIPLE CODES SAFE =====
-    if user.id in admin_state and admin_state[user.id]["step"] == "add_codes":
-
-        package = admin_state[user.id]["package"]
-
-        # حذف پیام ادمین تا کدها دیده نشود
         try:
             update.message.delete()
         except:
             pass
 
+        codes = load_codes()
+
         clean_text = text.replace("\u200b", "").replace("\ufeff", "")
-        codes = re.split(r'\s+', clean_text)
+        new_codes = re.split(r'\s+', clean_text)
 
         added = 0
-        duplicate = 0
 
-        for code in codes:
+        for code in new_codes:
             code = code.strip()
-
             if len(code) < 5:
                 continue
 
-            cursor.execute(
-                "INSERT OR IGNORE INTO codes (code, package, status) VALUES (?, ?, 'available')",
-                (code, package)
-            )
-
-            if cursor.rowcount == 1:
+            if code not in codes:
+                codes.append(code)
                 added += 1
-            else:
-                duplicate += 1
 
-        conn.commit()
-        admin_state.pop(user.id, None)
+        save_codes(codes)
+        admin_mode = False
 
         context.bot.send_message(
             update.effective_chat.id,
-            f"✅ {added} Codes Added Successfully",
-            reply_markup=main_menu(is_admin)
+            f"✅ {added} Codes Added\n📦 Total Stored: {len(codes)}"
         )
         return
 
-    # ===== DELIVER CODE =====
-    if text.startswith("📦"):
-        package = re.sub(r'\D', '', text)
-        deliver_code(update, package)
-        return
+    # ===== GET CODE =====
+    if text == "🎁 Get Code":
 
-    # ===== STOCK =====
-    if text == "📊 Stock":
-        show_stock(update)
-        return
+        codes = load_codes()
 
-# ================= DELIVER CODE =================
-def deliver_code(update, package):
+        if not codes:
+            update.message.reply_text("❌ No codes available")
+            return
 
-    if package not in PACKAGES:
-        return
+        code = codes.pop(0)
+        save_codes(codes)
 
-    cursor.execute(
-        "SELECT code FROM codes WHERE package=? AND status='available' LIMIT 1",
-        (package,)
-    )
-    result = cursor.fetchone()
-
-    if not result:
-        update.message.reply_text("❌ Out of stock")
-        return
-
-    code = result[0]
-    cursor.execute("UPDATE codes SET status='used' WHERE code=?", (code,))
-
-    user = update.effective_user
-    username = user.username if user.username else user.full_name
-
-    cursor.execute(
-        "INSERT INTO logs (user_id, username, package, code) VALUES (?, ?, ?, ?)",
-        (user.id, username, package, code)
-    )
-
-    conn.commit()
-
-    update.message.reply_text(
-        f"""🎁 {package} UC Delivered
-
-👤 User: {username}
-🔑 Code: {code}
-"""
-    )
-
-# ================= STOCK =================
-def show_stock(update):
-    message = "📦 STOCK STATUS\n\n"
-
-    for pkg in PACKAGES:
-        cursor.execute(
-            "SELECT COUNT(*) FROM codes WHERE package=? AND status='available'",
-            (pkg,)
+        update.message.reply_text(
+            f"🎁 Your Code:\n{code}\n\n📦 Remaining: {len(codes)}"
         )
-        count = cursor.fetchone()[0]
-        message += f"{pkg} UC → {count}\n"
 
-    update.message.reply_text(message)
-
-# ================= MAIN =================
+# ===== MAIN =====
 def main():
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
